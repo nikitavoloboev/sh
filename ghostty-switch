@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+MAPPINGS = [
+    ("~/src/org", "~/src/org"),
+]
+
+
+def read_clipboard() -> str:
+    try:
+        result = subprocess.run(["pbpaste"], check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError("Failed to read clipboard") from exc
+    return result.stdout
+
+
+def sanitize_path(raw: str) -> str:
+    cleaned = raw.strip()
+    if cleaned.startswith(("'", '"')) and cleaned.endswith(("'", '"')):
+        cleaned = cleaned[1:-1]
+    cleaned = cleaned.replace("\r", "")
+    cleaned = re.sub(r"\n\s*", "", cleaned)
+    return cleaned
+
+
+def resolve_path(path_str: str) -> Path:
+    expanded = os.path.expanduser(path_str)
+    return Path(expanded)
+
+
+def find_window_target(resolved: Path) -> str | None:
+    resolved_str = str(resolved)
+    for anchor, window_title in MAPPINGS:
+        expanded_anchor = os.path.expanduser(anchor)
+        if resolved_str.startswith(expanded_anchor):
+            return window_title
+    return None
+
+
+def activate_window(window_title: str) -> None:
+    escaped = window_title.replace("\"", "\\\"")
+    script = f"""
+    tell application "System Events"
+        if not (exists process "Ghostty") then
+            error "Ghostty is not running"
+        end if
+        tell process "Ghostty"
+            set frontmost to true
+            set targetWindows to windows whose name contains "{escaped}"
+            repeat with w in targetWindows
+                try
+                    perform action "AXRaise" of w
+                end try
+                try
+                    set value of attribute "AXMain" of w to true
+                end try
+                return
+            end repeat
+        end tell
+    end tell
+    error "No Ghostty window matching {escaped}"
+    """
+    proc = subprocess.run(["osascript"], input=script, text=True, capture_output=True)
+    if proc.returncode != 0:
+        stderr = proc.stderr.strip()
+        if not stderr:
+            stderr = proc.stdout.strip()
+        raise RuntimeError(stderr or f"Failed to activate window {window_title}")
+
+
+def main() -> int:
+    raw = read_clipboard()
+    if not raw.strip():
+        print("Clipboard is empty", file=sys.stderr)
+        return 1
+    sanitized = sanitize_path(raw)
+    if not sanitized:
+        print("Clipboard did not contain a usable path", file=sys.stderr)
+        return 1
+    resolved = resolve_path(sanitized)
+    target = find_window_target(resolved)
+    if target is None:
+        print(f"No Ghostty mapping for {resolved}", file=sys.stderr)
+        return 1
+    try:
+        activate_window(target)
+    except RuntimeError as err:
+        print(err, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
