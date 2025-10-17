@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Open a GitHub repository (already cloned) in Cursor based on a repo URL.
+
+script_name="$(basename "${BASH_SOURCE[0]}")"
+BASE_DIR="${HOME}/gh"
+
+usage() {
+  cat <<EOF
+Usage: ${script_name} <github-url>
+
+Pass a GitHub repository URL (SSH or HTTPS). The script resolves
+to <org>/<repo>, looks under ${BASE_DIR}, and opens the project in Cursor.
+EOF
+}
+
+if [[ $# -eq 0 ]]; then
+  usage
+  exit 1
+fi
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+url_input="$1"
+url="$(printf '%s' "${url_input}" | tr -d '[:space:]')"
+
+if [[ -z "${url}" ]]; then
+  printf "Empty URL provided.\n" >&2
+  exit 1
+fi
+
+case "${url}" in
+  git@github.com:*)
+    path="${url#git@github.com:}"
+    ;;
+  http://github.com/*|https://github.com/*)
+    path="${url#*github.com/}"
+    ;;
+  *)
+    printf "Unrecognized URL format: %s\n" "${url}" >&2
+    exit 1
+    ;;
+esac
+
+path="${path%.git}"
+path="${path%/}"
+
+org="${path%%/*}"
+repo="${path#*/}"
+
+if [[ -z "${org}" || -z "${repo}" || "${org}" == "${repo}" ]]; then
+  printf "Could not parse organization and repository from: %s\n" "${url}" >&2
+  exit 1
+fi
+
+dest_dir="${BASE_DIR}/${org}/${repo}"
+
+if [[ ! -d "${dest_dir}" ]]; then
+  printf "Project not found at: %s\n" "${dest_dir}" >&2
+  exit 1
+fi
+
+if ! open -a /Applications/Cursor.app "${dest_dir}"; then
+  printf "Failed to open Cursor at: %s\n" "${dest_dir}" >&2
+  exit 1
+fi
+
+osascript -e 'tell application "Keyboard Maestro Engine" to setvariable "MYPATH" to "'"${dest_dir}"'"' >/dev/null
+
+printf "Opened in Cursor: %s\n" "${dest_dir}"

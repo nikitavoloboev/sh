@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Search for directories whose name matches the provided pattern.
+
+script_name="$(basename "${BASH_SOURCE[0]}")"
+
+usage() {
+  cat <<EOF
+Usage: ${script_name} <name> [search-root]
+
+Search for directories with names containing <name> (case-insensitive).
+If [search-root] is omitted, the current directory is used.
+EOF
+}
+
+if [[ $# -eq 0 ]]; then
+  usage
+  exit 1
+fi
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+folder_name="$1"
+search_root="${2:-${PWD}}"
+
+if [[ ! -d "${search_root}" ]]; then
+  printf "Search root is not a directory: %s\n" "${search_root}" >&2
+  exit 1
+fi
+
+if ! command -v find >/dev/null 2>&1; then
+  printf "'find' command not available on PATH.\n" >&2
+  exit 1
+fi
+
+set +e
+matches="$(find "${search_root}" -type d -iname "*${folder_name}*" -print 2>/dev/null)"
+find_status=$?
+set -e
+
+if (( find_status != 0 && find_status != 1 )); then
+  printf "find exited with status %d\n" "${find_status}" >&2
+  exit "${find_status}"
+fi
+
+if [[ -z "${matches}" ]]; then
+  printf "No folders matching '%s' under %s\n" "${folder_name}" "${search_root}" >&2
+  exit 1
+fi
+
+printf "%s\n" "${matches}" | LC_ALL=C sort -f
